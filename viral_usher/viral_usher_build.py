@@ -685,6 +685,7 @@ def make_metadata_header(ncbi_header, nextclade_clade_columns, remove_segment, e
         midx = None
     # Add numerical date column
     metadata_header += '\tnum_date'
+    nextclade_col_list = []
     if nextclade_clade_columns:
         nextclade_col_list = get_nextclade_column_list(nextclade_clade_columns)
         metadata_header += '\t' + '\t'.join(nextclade_col_list)
