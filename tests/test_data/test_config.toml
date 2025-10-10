@@ -1,0 +1,7 @@
+# viral_usher config for test data
+
+taxonomy_id = '12345'
+ref_fasta = '/Users/theosanderson/viral_usher-1/tests/test_data/ref.fa'
+ref_gbff = '/Users/theosanderson/viral_usher-1/tests/test_data/ref.gbff'
+extra_fasta = '/Users/theosanderson/viral_usher-1/tests/test_data/sequences.fa'
+workdir = '/Users/theosanderson/viral_usher-1/tests/test_data/output'

@@ -1,0 +1,18 @@
+LOCUS       reference                240 bp    DNA     linear   VRL 10-OCT-2025
+DEFINITION  Test reference sequence.
+ACCESSION   reference
+VERSION     reference
+KEYWORDS    .
+SOURCE      Test virus
+  ORGANISM  Test virus
+            Viruses.
+FEATURES             Location/Qualifiers
+     source          1..240
+                     /organism="Test virus"
+                     /mol_type="genomic DNA"
+ORIGIN
+        1 gacaactcaa ccacaaggta agtgcaaatg aacttataac agtataatcg tgctagtgga
+       61 tcccaaaatt ccacgtggtg atatggtcct atagcgtacg cctagtagac ttgggtgaat
+      121 gacacgccga tactaagtgg gaatagtccg tagctccctg tggccagtga ggctgcgtag
+      181 gggcggcttc cggaatagcg tacgcgcctt tgggtccact cgacagcttg aggcataggg
+//

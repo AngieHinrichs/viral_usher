@@ -31,3 +31,6 @@ changed_nodes
 !example/*.jsonl.gz
 !app_note/*.tsv
 !app_note/logs*/*.log
+!tests/test_data/*.fa
+!tests/test_data/*.gbff
+!tests/test_data/*.toml

@@ -1,0 +1,50 @@
+name: Integration Test
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "viral_usher/**"
+      - "tests/test_data/**"
+      - "Dockerfile"
+      - "pyproject.toml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "viral_usher/**"
+      - "tests/test_data/**"
+      - "Dockerfile"
+      - "pyproject.toml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build the Docker image
+      run: docker build . --file Dockerfile --tag angiehinrichs/viral_usher:v0.9.0
+
+    - name: Set up Python
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.12"
+
+    - name: Install viral_usher
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+
+    - name: Run build with test data
+      run: |
+        viral_usher build --config tests/test_data/test_config.toml --no_genbank
+
+    - name: Check outputs exist
+      run: |
+        cd tests/test_data/output
+        ls -lh
+        test -f optimized.pb.gz
+        test -f viz.pb.gz
+        test -f metadata.tsv.gz
+        test -f tree.jsonl.gz
