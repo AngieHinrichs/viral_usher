@@ -18,6 +18,8 @@ RUN apt-get update && apt-get install -y gcc-12 g++-12
 ENV CC=gcc-12
 ENV CXX=g++-12
 RUN cd usher \
+    && git fetch --tags \
+    && git checkout v0.6.6 \
     && bash -x install/installUbuntu.sh
 
 WORKDIR /app
