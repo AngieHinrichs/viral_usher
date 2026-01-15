@@ -766,7 +766,7 @@ def add_extra_metadata_rows(m_out, midx, metadata_header, sample_names, nextclad
                 else:
                     metadata += '\t'
         else:
-            metadata += '\t' + '\t'.join([''] * ncbi_col_count)
+            metadata += '\t' * ncbi_col_count
         # Add numerical date column
         if extra_mapped_cols and 'date' in extra_mapped_cols and extra_mapped_cols['date'] in row:
             num_date = get_numerical_date(row[extra_mapped_cols['date']])
