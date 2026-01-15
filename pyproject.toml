@@ -1,6 +1,6 @@
 [project]
 name = "viral_usher"
-version = "0.10.0"
+version = "0.10.1"
 description = "Easily configure and run a pipeline to build a tree of virus genomes using UShER"
 authors = [{ name = "Angie Hinrichs", email = "hinrichs@ucsc.edu" }]
 readme = "README.md"
