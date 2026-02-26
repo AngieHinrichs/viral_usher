@@ -6,9 +6,12 @@ import importlib.metadata
 import re
 import logging
 import requests
+import tomllib
 from . import ncbi_helper
 from . import nextclade_helper
 from . import config
+
+viral_usher_trees_raw_base = "https://github.com/AngieHinrichs/viral_usher_trees/raw/refs/heads/main/"
 
 
 def get_input(prompt):
@@ -294,7 +297,7 @@ def check_write_config(config_contents, config_path):
 
 def search_viral_usher_trees(refseq_acc):
     """Search the viral_usher_trees repo for a tree with refseq_acc as its reference"""
-    url = "https://github.com/AngieHinrichs/viral_usher_trees/raw/refs/heads/main/tree_metadata.tsv"
+    url = viral_usher_trees_raw_base + "tree_metadata.tsv"
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
@@ -328,6 +331,21 @@ def get_viral_usher_trees_name(refseq_acc, args_use_viral_usher_trees, is_intera
                 print("Okay, will build tree from scratch.")
                 return ''
     return ''
+
+
+def get_viral_usher_trees_refs(tree_name):
+    """Download the config.toml file for the given tree and if it includes ref_fasta and ref_gbff entries then return those, otherwise return empty strings."""
+    url = viral_usher_trees_raw_base + f"trees/{tree_name}/config.toml"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        config_contents = tomllib.loads(response.text)
+        ref_fasta = config_contents.get("ref_fasta", "").replace("./", viral_usher_trees_raw_base)
+        ref_gbff = config_contents.get("ref_gbff", "").replace("./", viral_usher_trees_raw_base)
+        return ref_fasta, ref_gbff
+    except requests.RequestException as e:
+        print(f"Warning: Unable to access viral_usher_trees repository to get config for {tree_name}: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def get_min_length_proportion(args_min_length_proportion, is_interactive):
@@ -459,6 +477,8 @@ def handle_init(args):
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     ncbi = ncbi_helper.NcbiHelper()
     # First sort out the interdependent refseq and taxonomy id options.
+    ref_fasta = ''
+    ref_gbff = ''
     if args.refseq:
         if args.ref_fasta or args.ref_gbff:
             print("Error: --refseq cannot be used together with --ref_fasta or --ref_gbff", file=sys.stderr)
@@ -493,15 +513,17 @@ def handle_init(args):
             print("Error: --refseq cannot be used together with --ref_fasta or --ref_gbff", file=sys.stderr)
             sys.exit(1)
         if not args.ref_fasta or not args.ref_gbff:
-            print("Error: both --ref_fasta and --ref_gbff must be provided when not using --refseq", file=sys.stderr)
+            print("Error: both --ref_fasta and --ref_gbff must be provided when using one or the other", file=sys.stderr)
             sys.exit(1)
+        ref_fasta = args.ref_fasta
+        ref_gbff = args.ref_gbff
         refseq_id = ''
         assembly_id = ''
-        ok, error_message = check_optional_file_readable(args.ref_fasta)
+        ok, error_message = check_optional_file_readable(ref_fasta)
         if not ok:
             print(f"{error_message}\nPlease try again with a different file for --ref_fasta.", file=sys.stderr)
             sys.exit(1)
-        ok, error_message = check_optional_file_readable(args.ref_gbff)
+        ok, error_message = check_optional_file_readable(ref_gbff)
         if not ok:
             print(f"{error_message}\nPlease try again with a different file for --ref_gbff.", file=sys.stderr)
             sys.exit(1)
@@ -529,8 +551,16 @@ def handle_init(args):
 
     viral_usher_trees_name = get_viral_usher_trees_name(refseq_id, args.use_viral_usher_trees, is_interactive)
     if viral_usher_trees_name:
-        update_tree_input = f"https://github.com/AngieHinrichs/viral_usher_trees/raw/refs/heads/main/trees/{viral_usher_trees_name}/optimized.pb.gz"
-        # Note: if/when viral_usher_trees gets rerooting, we will also need to download ref_fasta and ref_gbff
+        update_tree_input = viral_usher_trees_raw_base + f"trees/{viral_usher_trees_name}/optimized.pb.gz"
+        ref_fasta, ref_gbff = get_viral_usher_trees_refs(viral_usher_trees_name)
+        if ref_fasta:
+            if args.ref_fasta and args.ref_fasta != ref_fasta:
+                print(f"Warning: ignoring --ref_fasta {args.ref_fasta} because it conflicts with the ref_fasta {ref_fasta} used for the viral_usher_trees tree {viral_usher_trees_name}.", file=sys.stderr)
+            if args.ref_gbff and args.ref_gbff != ref_gbff:
+                print(f"Warning: ignoring --ref_gbff {args.ref_gbff} because it conflicts with the ref_gbff {ref_gbff} used for the viral_usher_trees tree {viral_usher_trees_name}.", file=sys.stderr)
+            print(f"Using reference fasta and GenBank file from viral_usher_trees {viral_usher_trees_name} config")
+            refseq_id = ''
+            assembly_id = ''
     else:
         update_tree_input = ""
     nextclade_path, nextclade_columns = get_nextclade_path_columns(args.nextclade_dataset, species, is_interactive)
@@ -547,8 +577,8 @@ def handle_init(args):
         "viral_usher_version": viral_usher_version,
         "refseq_acc": refseq_id,
         "refseq_assembly": assembly_id,
-        "ref_fasta": args.ref_fasta if args.ref_fasta else "",
-        "ref_gbff": args.ref_gbff if args.ref_gbff else "",
+        "ref_fasta": ref_fasta,
+        "ref_gbff": ref_gbff,
         "update_tree_input": update_tree_input,
         "species": species,
         "taxonomy_id": taxid,
