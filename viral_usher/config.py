@@ -13,6 +13,10 @@ DEFAULT_MAX_BRANCH_LENGTH = 10000
 DEFAULT_DOCKER_IMAGE = "angiehinrichs/viral_usher"
 
 
+def is_url(path):
+    return path.startswith('http://') or path.startswith('https://')
+
+
 def handle_path_or_url(config_value):
     """
     Resolve a config value that can be either a local file path or a URL.
@@ -25,7 +29,7 @@ def handle_path_or_url(config_value):
     # Convert Path objects to strings
     config_value = str(config_value)
 
-    if config_value.startswith('http://') or config_value.startswith('https://'):
+    if is_url(config_value):
         print(f"Downloading {config_value}...")
         filename = os.path.basename(config_value.split('?')[0])  # Remove query params if any
         if not filename:
@@ -71,10 +75,10 @@ def check_refseq_vs_ref(config, check_paths=True):
     if (not refseq_acc or not refseq_assembly) and (not ref_fasta or not ref_gbff):
         raise ValueError("Config must specify either refseq_acc and refseq_assembly, or ref_fasta and ref_gbff.")
     if ref_fasta:
-        if check_paths and (not os.path.exists(ref_fasta) or not os.access(ref_fasta, os.R_OK)):
+        if check_paths and not is_url(ref_fasta) and (not os.path.exists(ref_fasta) or not os.access(ref_fasta, os.R_OK)):
             raise ValueError(f"Reference FASTA file '{ref_fasta}' does not exist or is not readable.")
     if ref_gbff:
-        if check_paths and (not os.path.exists(ref_gbff) or not os.access(ref_gbff, os.R_OK)):
+        if check_paths and not is_url(ref_gbff) and (not os.path.exists(ref_gbff) or not os.access(ref_gbff, os.R_OK)):
             raise ValueError(f"Reference GenBank file '{ref_gbff}' does not exist or is not readable.")
 
 
