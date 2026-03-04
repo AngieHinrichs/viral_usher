@@ -801,6 +801,103 @@ def add_extra_metadata_rows(m_out, midx, metadata_header, sample_names, nextclad
     return date_min, date_max
 
 
+def finalize_metadata_from_original(original_metadata, sample_names, extra_fasta_names,
+                                    extra_metadata, extra_metadata_date_column):
+    """When original_metadata (the existing tree's metadata.tsv.gz) is provided, use it as the
+    source of metadata for existing sequences.  New sequences from extra_fasta get rows with
+    values from extra_metadata if provided, otherwise empty fields."""
+    rename_out = "rename.tsv"
+    metadata_out = "metadata.tsv.gz"
+    start_time = start_timing(f"Finalizing metadata from original_metadata, writing to {metadata_out}...")
+    date_min = None
+    date_max = None
+
+    # Read sample names (sequences in the final tree)
+    sample_names_set = set()
+    with open(sample_names, 'r') as sn:
+        for line in sn:
+            sample_names_set.add(line.strip())
+
+    # Read original metadata header and rows
+    orig_header = None
+    orig_rows = {}
+    with open_maybe_decompress(original_metadata) as om:
+        orig_header = om.readline().rstrip('\n').split('\t')
+        for line in om:
+            fields = line.rstrip('\n').split('\t')
+            if fields:
+                orig_rows[fields[0]] = fields
+
+    # Find num_date column index if present
+    num_date_idx = orig_header.index('num_date') if 'num_date' in orig_header else None
+
+    # Read extra metadata for new sequences (if provided)
+    extra_metadata_cols, extra_metadata_rows = get_extra_metadata(extra_metadata)
+
+    # Map extra metadata columns to original metadata header positions
+    extra_col_map = {}  # orig_header index -> extra_metadata column name
+    if extra_metadata_cols:
+        for col in extra_metadata_cols:
+            mapped_col = col
+            if col == extra_metadata_date_column:
+                mapped_col = 'date'
+            if mapped_col in orig_header:
+                extra_col_map[orig_header.index(mapped_col)] = col
+
+    header_line = '\t'.join(orig_header) + '\n'
+
+    with open(rename_out, 'w') as r_out, gzip.open(metadata_out, 'wt') as m_out:
+        m_out.write(header_line)
+
+        # Write rows for existing sequences that are in the final tree
+        for name, fields in orig_rows.items():
+            if name not in sample_names_set:
+                continue
+            m_out.write('\t'.join(fields) + '\n')
+            # No renaming needed — original metadata already uses display names
+            if num_date_idx is not None and num_date_idx < len(fields) and fields[num_date_idx]:
+                try:
+                    nd = float(fields[num_date_idx])
+                    if date_min is None or nd < date_min:
+                        date_min = nd
+                    if date_max is None or nd > date_max:
+                        date_max = nd
+                except ValueError:
+                    pass
+
+        # Write rows for new extra_fasta sequences that are in the final tree
+        if extra_fasta_names:
+            for name in extra_fasta_names:
+                if name not in sample_names_set:
+                    continue
+                extra_row = extra_metadata_rows.get(name, {})
+                fields = [name]
+                for i, col in enumerate(orig_header[1:], 1):
+                    if i in extra_col_map and extra_col_map[i] in extra_row:
+                        val = extra_row[extra_col_map[i]]
+                    elif col in extra_row:
+                        val = extra_row[col]
+                    elif col == 'num_date' and extra_metadata_date_column:
+                        # Compute num_date from the date column in extra_metadata
+                        date_col = extra_metadata_date_column
+                        date_val = extra_row.get(date_col, '')
+                        nd = get_numerical_date(date_val) if date_val else 0.0
+                        val = f"{nd:.6f}" if nd else ''
+                        if nd:
+                            if date_min is None or nd < date_min:
+                                date_min = nd
+                            if date_max is None or nd > date_max:
+                                date_max = nd
+                    else:
+                        val = ''
+                    fields.append(val)
+                m_out.write('\t'.join(fields) + '\n')
+
+    finish_timing(start_time)
+    # extra_added_cols and extra_mapped_cols are empty since original_metadata defines the schema
+    return metadata_out, rename_out, date_min, date_max, [], {}
+
+
 def finalize_metadata(ncbi_virus_metadata, nextclade_assignments, nextclade_clade_columns, ref_segment, sample_names,
                       extra_fasta_names, extra_metadata, extra_metadata_date_column):
     """Make a file for renaming sequence names in tree to include country, isolate name and date when available.
@@ -883,16 +980,13 @@ def get_header(tsv_in):
 
 
 def make_taxonium_config(date_min, date_max, nextclade_clade_columns, got_extra_fasta, no_genbank, extra_added_cols,
-                         extra_mapped_cols):
+                         extra_mapped_cols, original_metadata_cols=None):
     """Make a config file with a color gradient from date_min to date_max."""
     config_out = "taxonium_config.json"
-    if no_genbank:
-        color_by_options = []
-        if extra_mapped_cols:
-            color_by_options += ["meta_" + col for col in extra_mapped_cols.keys()]
-        if 'date' in extra_mapped_cols:
-            color_by_options.append("meta_num_date")
-    else:
+    if original_metadata_cols:
+        # Use columns from original_metadata (excluding 'strain' which is the index)
+        color_by_options = ["meta_" + col for col in original_metadata_cols if col != 'strain']
+    elif no_genbank:
         color_by_options = ["meta_country", "meta_location", "meta_num_date", "meta_host", "meta_serotype"]
         if got_extra_fasta is not None:
             color_by_options.append("meta_source")
@@ -989,14 +1083,15 @@ def make_taxonium_overlay_html(config_contents, ref_acc, no_genbank, got_extra_f
 
 
 def usher_to_taxonium(pb_in, metadata_in, ref_gbff, tip_count, species, ref_acc, date_min, date_max,
-                      nextclade_clade_columns, no_genbank, extra_added_cols, extra_mapped_cols, config_contents):
+                      nextclade_clade_columns, no_genbank, extra_added_cols, extra_mapped_cols, config_contents,
+                      original_metadata_cols=None):
     jsonl_out = "tree.jsonl.gz"
     start_time = start_timing(f"Running usher_to_taxonium to make {jsonl_out}...")
     columns = ','.join(get_header(metadata_in))
-    title = f"{tip_count} {species} sequences from GenBank aligned to {ref_acc}"
+    title = f"{tip_count} {species or 'unknown'} sequences aligned to {ref_acc}"
     got_extra_fasta = bool(config_contents.get('extra_fasta', ''))
     config = make_taxonium_config(date_min, date_max, nextclade_clade_columns, got_extra_fasta, no_genbank,
-                                  extra_added_cols, extra_mapped_cols)
+                                  extra_added_cols, extra_mapped_cols, original_metadata_cols)
     overlay_html = config_contents.get('taxonium_overlay_html', '')
     if not overlay_html:
         overlay_html = make_taxonium_overlay_html(config_contents, ref_acc, no_genbank, got_extra_fasta)
@@ -1108,6 +1203,7 @@ def main():
     extra_fasta = config_contents.get('extra_fasta', '')
     extra_metadata = config_contents.get('extra_metadata', '')
     extra_metadata_date_column = config_contents.get('extra_metadata_date_column', '')
+    original_metadata = config_contents.get('original_metadata', '')
     update_tree_input = config_contents.get('update_tree_input', optimized_pb)
     if update_tree_input == "":
         update_tree_input = optimized_pb
@@ -1165,14 +1261,25 @@ def main():
     nextclade_assignments, nextclade_clade_columns = run_nextclade(nextclade_path, nextclade_clade_columns,
                                                                    existing_nextclade_assignments, existing_column_count,
                                                                    genbank_fasta, extra_fasta, ref_fasta)
-    metadata_tsv, rename_tsv, date_min, date_max, extra_added_cols, extra_mapped_cols = \
-        finalize_metadata(ncbi_virus_metadata, nextclade_assignments, nextclade_clade_columns, ref_segment,
-                          sample_names, extra_fasta_names, extra_metadata, extra_metadata_date_column)
+    if original_metadata:
+        metadata_tsv, rename_tsv, date_min, date_max, extra_added_cols, extra_mapped_cols = \
+            finalize_metadata_from_original(original_metadata, sample_names, extra_fasta_names,
+                                            extra_metadata, extra_metadata_date_column)
+    else:
+        metadata_tsv, rename_tsv, date_min, date_max, extra_added_cols, extra_mapped_cols = \
+            finalize_metadata(ncbi_virus_metadata, nextclade_assignments, nextclade_clade_columns, ref_segment,
+                              sample_names, extra_fasta_names, extra_metadata, extra_metadata_date_column)
     viz_tree = rename_seqs(opt_tree, rename_tsv)
     dump_newick(viz_tree)
     write_output_stats(ref_acc, ref_length, gb_count, filtered_count, aligned_count, tree_tip_count)
+    # Read original_metadata header for taxonium config color_by_options
+    original_metadata_cols = None
+    if original_metadata:
+        with open_maybe_decompress(original_metadata) as om:
+            original_metadata_cols = om.readline().rstrip('\n').split('\t')
     usher_to_taxonium(viz_tree, metadata_tsv, ref_gbff, tree_tip_count, species, ref_acc, date_min, date_max,
-                      nextclade_clade_columns, args.no_genbank, extra_added_cols, extra_mapped_cols, config_contents)
+                      nextclade_clade_columns, args.no_genbank, extra_added_cols, extra_mapped_cols, config_contents,
+                      original_metadata_cols)
 
 
 if __name__ == "__main__":

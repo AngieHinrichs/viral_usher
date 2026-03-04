@@ -36,3 +36,4 @@ changed_nodes
 !tests/test_data/*.fa
 !tests/test_data/*.gbff
 !tests/test_data/*.toml
+.venv/
