@@ -561,8 +561,10 @@ def handle_init(args):
             print(f"Using reference fasta and GenBank file from viral_usher_trees {viral_usher_trees_name} config")
             refseq_id = ''
             assembly_id = ''
+        update_metadata_input = viral_usher_trees_raw_base + f"trees/{viral_usher_trees_name}/metadata.tsv.gz"
     else:
         update_tree_input = ""
+        update_metadata_input = ""
     nextclade_path, nextclade_columns = get_nextclade_path_columns(args.nextclade_dataset, species, is_interactive)
     min_length_proportion = get_min_length_proportion(args.min_length_proportion, is_interactive)
     max_N_proportion = get_max_N_proportion(args.max_N_proportion, is_interactive)
@@ -580,6 +582,7 @@ def handle_init(args):
         "ref_fasta": ref_fasta,
         "ref_gbff": ref_gbff,
         "update_tree_input": update_tree_input,
+        "update_metadata_input": update_metadata_input,
         "species": species,
         "taxonomy_id": taxid,
         "nextclade_dataset": nextclade_path,

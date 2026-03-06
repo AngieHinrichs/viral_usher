@@ -734,15 +734,31 @@ def make_metadata_and_rename(row, midx, remove_segment, nextclade_assignments, n
     return metadata_line, rename_line, name, num_date
 
 
+def update_min_max_dates(num_date, date_min, date_max):
+    """Update the minimum and maximum dates seen so far, given a new numerical date."""
+    if num_date is not None:
+        if date_min is None or num_date < date_min:
+            date_min = num_date
+        if date_max is None or num_date > date_max:
+            date_max = num_date
+    return date_min, date_max
+
+
+def get_set_from_file(filename):
+    """Read a file and return a set of stripped lines."""
+    result_set = set()
+    with open(filename, 'r') as f:
+        for line in f:
+            result_set.add(line.strip())
+    return result_set
+
+
 def add_extra_metadata_rows(m_out, midx, metadata_header, sample_names, nextclade_assignments, nextclade_col_count,
                             extra_fasta_names, extra_added_cols, extra_mapped_cols, extra_metadata_rows):
     """Add metadata lines for user-provided extra fasta sequences that are in the tree (i.e. in sample_names)."""
     if not extra_fasta_names:
         return None, None
-    sample_names_set = set()
-    with open(sample_names, 'r') as sn:
-        for line in sn:
-            sample_names_set.add(line.strip())
+    sample_names_set = get_set_from_file(sample_names)
     # For each name in extra_fasta_names that is in sample_names_set (i.e. in the tree), add a metadata line:
     # Name, followed by empty (or merged if user-provided) fields for all NCBI-derived metadata columns prior
     # to nextclade clades, then nextclade clades if any, then 'user-provided' in source column, then extra
@@ -777,11 +793,7 @@ def add_extra_metadata_rows(m_out, midx, metadata_header, sample_names, nextclad
         else:
             num_date = None
             metadata += '\t'
-        if num_date is not None:
-            if date_min is None or num_date < date_min:
-                date_min = num_date
-            if date_max is None or num_date > date_max:
-                date_max = num_date
+        date_min, date_max = update_min_max_dates(num_date, date_min, date_max)
         if nextclade_col_count > 0:
             if name in nextclade_assignments:
                 clades = nextclade_assignments[name]
@@ -801,8 +813,8 @@ def add_extra_metadata_rows(m_out, midx, metadata_header, sample_names, nextclad
     return date_min, date_max
 
 
-def finalize_metadata(ncbi_virus_metadata, nextclade_assignments, nextclade_clade_columns, ref_segment, sample_names,
-                      extra_fasta_names, extra_metadata, extra_metadata_date_column):
+def finalize_metadata_ncbi(ncbi_virus_metadata, nextclade_assignments, nextclade_clade_columns, ref_segment, sample_names,
+                           extra_fasta_names, extra_metadata, extra_metadata_date_column):
     """Make a file for renaming sequence names in tree to include country, isolate name and date when available.
     Prepare metadata for taxonium."""
     rename_out = "rename.tsv"
@@ -822,7 +834,8 @@ def finalize_metadata(ncbi_virus_metadata, nextclade_assignments, nextclade_clad
     extra_added_cols, extra_mapped_cols = analyze_extra_columns(extra_metadata_cols, header, extra_metadata_date_column)
     metadata_header, midx, nextclade_col_count = make_metadata_header(header, nextclade_clade_columns, remove_segment,
                                                                       extra_fasta_names, extra_added_cols, extra_mapped_cols)
-    # Use a subprocess to get input from grep -Fwf {sample_names} {ncbi_virus_metadata}
+    # Use a subprocess to get input from grep -Fwf {sample_names} {ncbi_virus_metadata} because it can be huge and grep is faster than python.
+    # Particularly in the case of influenza with 8 segments all together in one metadata file, most rows need to be filtered out.
     grep_cmd = ['grep', '-Fwf', sample_names, ncbi_virus_metadata]
     with subprocess.Popen(grep_cmd, stdout=subprocess.PIPE, text=True) as grep_proc, \
             open(rename_out, 'w') as r_out, gzip.open(metadata_out, 'wt') as m_out:
@@ -834,11 +847,7 @@ def finalize_metadata(ncbi_virus_metadata, nextclade_assignments, nextclade_clad
         for row in reader:
             metadata, rename, name, num_date = make_metadata_and_rename(row, midx, remove_segment, nextclade_assignments,
                                                                         nextclade_col_count, extra_fasta_names, len(extra_added_cols))
-            if num_date is not None:
-                if date_min is None or num_date < date_min:
-                    date_min = num_date
-                if date_max is None or num_date > date_max:
-                    date_max = num_date
+            date_min, date_max = update_min_max_dates(num_date, date_min, date_max)
             # Write output to both renaming file and metadata file
             r_out.write(rename)
             m_out.write(metadata)
@@ -850,6 +859,200 @@ def finalize_metadata(ncbi_virus_metadata, nextclade_assignments, nextclade_clad
             date_min = extra_date_min
         if extra_date_max is not None and (date_max is None or extra_date_max > date_max):
             date_max = extra_date_max
+    finish_timing(start_time)
+    return metadata_out, rename_out, date_min, date_max, extra_added_cols, extra_mapped_cols
+
+
+def finalize_metadata_update(update_metadata_input, ncbi_virus_metadata,
+                             nextclade_assignments, nextclade_clade_columns, ref_segment, sample_names,
+                             extra_fasta_names, extra_metadata, extra_metadata_date_column):
+    """Use the update_metadata_input file as primary source of metadata.  It should be from a previous run of viral_usher
+    and must have at least the columns strain, accession, date and num_date.  If GenBank sequences were also added, then
+    ncbi_virus_metadata will be used as the source for those sequences.  If extra sequences were added and extra_metadata
+    is provided, add columns for any metadata in extra_metadata that can't be mapped to columns in update_metadata_input,
+    and add rows for any user-provided sequences in extra_fasta that are in the tree.
+    Merge nextclade clade assignments into those, and write out a new metadata file for taxonium and a
+    renaming file (which now is just a swap of the first two columns from update_metadata_input, strain (i.e. long name)
+    and accession)."""
+    rename_out = "rename.tsv"
+    metadata_out = "metadata.tsv.gz"
+    start_time = start_timing(f"Finalizing sequence names for display and metadata, writing to {metadata_out}...")
+    date_min = None
+    date_max = None
+    metadata_in_columns = get_header(update_metadata_input)
+    # Check our assumptions that update_metadata_input was produced by viral_usher and has the expected columns.
+    expected_columns = ['strain', 'accession', 'date', 'num_date']
+    for col in expected_columns:
+        if col not in metadata_in_columns:
+            print(f"Error: update_metadata_input file {update_metadata_input} is missing expected column '{col}'.", file=sys.stderr)
+            sys.exit(1)
+    # We will use each row's strain and accession columns to make rename_out.
+    strain_idx = metadata_in_columns.index('strain')
+    accession_idx = metadata_in_columns.index('accession')
+    # We will use each row's num_date column to track min and max dates for color gradient in taxonium, so find its index.
+    num_date_idx = metadata_in_columns.index('num_date')
+    # Load extra metadata (if any) and analyze which columns can be mapped to input metadata columns and which are new
+    extra_metadata_cols, extra_metadata_rows = get_extra_metadata(extra_metadata)
+    extra_added_cols, extra_mapped_cols = analyze_extra_columns(extra_metadata_cols, metadata_in_columns, extra_metadata_date_column)
+    # Likewise, if input metadata has Nextclade columns, see how they match up to the new Nextclade columns, and if there are new ones added by an updated Nextclade dataset, add those too
+    nextclade_col_list = get_nextclade_column_list(nextclade_clade_columns)
+    nextclade_col_index = {col: idx for idx, col in enumerate(nextclade_col_list)}
+    nextclade_added_cols, nextclade_mapped_cols = analyze_extra_columns(nextclade_col_list, metadata_in_columns, None)
+    if nextclade_added_cols:
+        print(f"Warning: the following Nextclade columns were not found in update_metadata_input file {update_metadata_input} and will be added as new empty columns: {', '.join(nextclade_added_cols)}.  The nextclade assignments in the input metadata may be outdated.", file=sys.stderr)
+    # Now form output columns: start with input metadata columns, then add any new
+    # Nextclade columns, then a source column if not already in input metadata, then any new extra metadata columns.
+    # Also build an index into the input metadata columns to know where to find the info we need to merge in.
+    metadata_out_columns = metadata_in_columns.copy()
+    metadata_out_columns += nextclade_added_cols
+    add_source_column = extra_fasta_names is not None and 'source' not in metadata_in_columns
+    if add_source_column:
+        metadata_out_columns += ['source']
+    metadata_out_columns += extra_added_cols
+    nextclade_added_count = len(nextclade_added_cols)
+    extra_added_count = len(extra_added_cols)
+    sample_names_set = get_set_from_file(sample_names)
+    ncbi_added_set = sample_names_set - set(extra_fasta_names) if extra_fasta_names else sample_names_set.copy()
+    # Write metadata, starting with input plus extra columns, and then adding extra rows for user-provided sequences if applicable
+    with open(rename_out, 'w') as r_out, gzip.open(metadata_out, 'wt') as m_out:
+        # metadata output has a header but not renaming output
+        m_out.write('\t'.join(metadata_out_columns) + '\n')
+        with open_maybe_decompress(update_metadata_input) as csv_in:
+            # Skip input header line
+            csv_in.readline()
+            reader = csv.reader(csv_in, delimiter='\t')
+            for row in reader:
+                # renaming output is simple: accession and strain (i.e. long name)
+                accession = row[accession_idx]
+                rename_line = "\t".join([accession, row[strain_idx]]) + '\n'
+                r_out.write(rename_line)
+                # Remove accessions from input metadata from our notion of which NCBI sequences have just been added
+                if accession in ncbi_added_set:
+                    ncbi_added_set.remove(accession)
+                # metadata output is input columns plus empty strings for added columns and source column
+                metadata_line = '\t'.join(row) + '\t' * nextclade_added_count
+                if add_source_column:
+                    # This is not necessarily GenBank.  It's whatever update_metadata_input is based on, which is probably
+                    # GenBank but could be a previous viral_usher run that included extra fasta sequences, but in that case
+                    # update_metadata_input could have a source column and then we wouldn't add source here.
+                    metadata_line += '\tGenBank'
+                metadata_line += '\t' * extra_added_count + '\n'
+                m_out.write(metadata_line)
+                # Update min and max dates seen, for color gradient in taxonium
+                num_date = float(row[num_date_idx]) if row[num_date_idx] else None
+                date_min, date_max = update_min_max_dates(num_date, date_min, date_max)
+        # Add NCBI metadata for any remaining accessions in ncbi_added_set if we have NCBI metadata
+        if ncbi_virus_metadata and ncbi_added_set:
+            # A pipe from grep -Fwf {ncbi_added_accessions} {ncbi_virus_metadata} would be faster than reading the whole file
+            # in python, but I need to use the column names below, and grep loses the header.  If this becomes a problem for
+            # influenza then we can get column names and indices from the header line first, then grep, and reconstruct ncbi_row.
+            with open(ncbi_virus_metadata, 'rt') as csv_in:
+                reader = csv.DictReader(csv_in, delimiter=',')
+                for ncbi_row in reader:
+                    accession = ncbi_row['accession']
+                    if accession not in ncbi_added_set:
+                        continue
+                    # Split NCBI country_location into sanitized country and location columns.
+                    if 'country_location' in ncbi_row:
+                        country_loc = ncbi_row['country_location'].strip()
+                        country, location = country_loc.split(':', 1) if ':' in country_loc else (country_loc, '')
+                        ncbi_row['country'] = sanitize_name(country.strip())
+                        ncbi_row['location'] = location.strip()
+                    # Add numerical date column if possible, and update date_min and date_max.
+                    if 'date' in ncbi_row:
+                        num_date = get_numerical_date(ncbi_row['date'].strip())
+                        date_min, date_max = update_min_max_dates(num_date, date_min, date_max)
+                        ncbi_row['num_date'] = f"{num_date:.6f}" if num_date else ''
+                    # Change NCBI strain column to gb_strain to avoid confusion with the 'strain' column we use for the full descriptor in the output metadata.
+                    if 'strain' in ncbi_row:
+                        ncbi_row['gb_strain'] = sanitize_name(ncbi_row.pop('strain').strip())
+                    isolate = sanitize_name(ncbi_row.get('isolate', '').strip())
+                    gb_strain = sanitize_name(ncbi_row.get('gb_strain', '').strip())
+                    country = sanitize_name(ncbi_row.get('country', '').strip())
+                    ncbi_row['strain'] = make_display_name(isolate, gb_strain, ncbi_row.get('date', '').strip(), accession, country)
+                    # Rename these accessions to full names in tree.
+                    rename_line = "\t".join([accession, ncbi_row['strain']]) + '\n'
+                    r_out.write(rename_line)
+                    # Output columns start with metadata_in_columns
+                    row_out = []
+                    for col in metadata_in_columns:
+                        if col in ncbi_row:
+                            row_out.append(ncbi_row[col].strip())
+                        elif col == 'source':
+                            row_out.append('GenBank')
+                        elif col in nextclade_mapped_cols:
+                            nextclade_col = nextclade_mapped_cols[col]
+                            if accession in nextclade_assignments:
+                                row_out.append(nextclade_assignments[accession][nextclade_col_index[nextclade_col]])
+                            else:
+                                row_out.append('')
+                        else:
+                            row_out.append('')
+                    # Add any new Nextclade columns if applicable
+                    for col in nextclade_added_cols:
+                        if accession in nextclade_assignments:
+                            row_out.append(nextclade_assignments[accession][nextclade_col_index[col]])
+                        else:
+                            row_out.append('')
+                    # Add source column if not already in input columns, to distinguish GenBank sequences from user-provided sequences
+                    if add_source_column:
+                        row_out.append('GenBank')
+                    # Then add any new extra metadata columns if applicable
+                    for col in extra_added_cols:
+                        if col in ncbi_row:
+                            row_out.append(ncbi_row[col].strip())
+                        else:
+                            row_out.append('')
+                    metadata_line = '\t'.join(row_out) + '\n'
+                    m_out.write(metadata_line)
+        # Add metadata lines for user-provided extra fasta sequences that were added to the tree if applicable
+        for name in extra_fasta_names if extra_fasta_names else []:
+            if name not in sample_names_set:
+                continue
+            row = extra_metadata_rows.get(name, {})
+            # Add numerical date column to row if it has a date column.
+            if extra_mapped_cols and 'date' in extra_mapped_cols and extra_mapped_cols['date'] in row:
+                num_date = get_numerical_date(row[extra_mapped_cols['date']])
+                date_min, date_max = update_min_max_dates(num_date, date_min, date_max)
+                row['num_date'] = f'{num_date:.6f}' if num_date else ''
+            # Begin output row with input metadata columns, using values from extra metadata when possible, otherwise empty,
+            # but set source (if applicable) to 'user-provided'.
+            row_out = []
+            for col in metadata_in_columns:
+                if col == 'strain':
+                    row_out.append(name)
+                elif col == 'source':
+                    row_out.append('user-provided')
+                elif col == 'num_date':
+                    row_out.append(row.get('num_date', ''))
+                elif col in extra_mapped_cols:
+                    row_out.append(row.get(extra_mapped_cols[col], ''))
+                elif col in nextclade_mapped_cols:
+                    nextclade_col = nextclade_mapped_cols[col]
+                    nextclade_val = ''
+                    if name in nextclade_assignments:
+                        nextclade_val = nextclade_assignments[name][nextclade_col_index[nextclade_col]]
+                    row_out.append(nextclade_val)
+                else:
+                    row_out.append('')
+            # Then add any new Nextclade columns if applicable
+            for col in nextclade_added_cols:
+                if name in nextclade_assignments:
+                    row_out.append(nextclade_assignments[name][nextclade_col_index[col]])
+                else:
+                    row_out.append('')
+            # Add source column if not already in input columns, to distinguish user-provided sequences from GenBank sequences
+            if add_source_column:
+                row_out.append('user-provided')
+            # Then add any new extra metadata columns if applicable
+            for col in extra_added_cols:
+                if col in row:
+                    row_out.append(row[col])
+                else:
+                    row_out.append('')
+            metadata_line = '\t'.join(row_out) + '\n'
+            m_out.write(metadata_line)
+
     finish_timing(start_time)
     return metadata_out, rename_out, date_min, date_max, extra_added_cols, extra_mapped_cols
 
@@ -875,7 +1078,7 @@ def dump_newick(pb_in):
 
 
 def get_header(tsv_in):
-    with gzip.open(tsv_in, 'rt') as tsv:
+    with open_maybe_decompress(tsv_in) as tsv:
         header = tsv.readline().split('\t')
         for idx, field in enumerate(header):
             header[idx] = field.strip()
@@ -1072,16 +1275,19 @@ def get_new_extra_fasta(tree_names, extra_fasta):
 
 
 def run_nextclade_on_existing(ncbi, starting_tree_accessions, nextclade_path, nextclade_clade_columns,
-                              extra_fasta, ref_fasta):
-    """Download GenBank sequences that are already in the tree.  Run nextclade on those plus extra_fasta."""
-    old_genbank_zip = "genbank_old.zip"
-    start_time = start_timing("Downloading and unpacking GenBank genomes that were already in the tree, for nextclade...")
-    ncbi.download_genbank_accessions(list(starting_tree_accessions), old_genbank_zip)
-    old_genbank_fasta, _, _ = unpack_genbank_zip(old_genbank_zip, {}, 0, 1.0, "")
-    finish_timing(start_time)
+                              extra_fasta, ref_fasta, no_genbank):
+    """Download GenBank sequences that are already in the tree unless --no_genbank.  Run nextclade on those plus extra_fasta."""
+    if no_genbank:
+        old_genbank_fasta = "/dev/null"
+    else:
+        old_genbank_zip = "genbank_old.zip"
+        start_time = start_timing("Downloading and unpacking GenBank genomes that were already in the tree, for nextclade...")
+        ncbi.download_genbank_accessions(list(starting_tree_accessions), old_genbank_zip)
+        old_genbank_fasta, _, _ = unpack_genbank_zip(old_genbank_zip, {}, 0, 1.0, "")
+        os.remove(old_genbank_zip)
+        finish_timing(start_time)
     print("Running nextclade on genomes that were already in the tree.")
     run_nextclade(nextclade_path, nextclade_clade_columns, {}, None, old_genbank_fasta, extra_fasta, ref_fasta)
-    os.remove(old_genbank_zip)
     if not os.path.exists(update_nextclade_input):
         print(f"Expected {update_nextclade_input} to be created but it's not found.", sys.stderr)
         sys.exit(1)
@@ -1109,9 +1315,10 @@ def main():
     extra_metadata = config_contents.get('extra_metadata', '')
     extra_metadata_date_column = config_contents.get('extra_metadata_date_column', '')
     update_tree_input = config_contents.get('update_tree_input', optimized_pb)
+    update_metadata_input = config_contents.get('update_metadata_input', '')
     if update_tree_input == "":
         update_tree_input = optimized_pb
-    # Force update mode if update_tree_input is given
+    # Force update mode if non-default update_tree_input is given
     do_update = True if update_tree_input != optimized_pb else args.update
     species = config_contents.get('species', None)
     ncbi = ncbi_helper.NcbiHelper()
@@ -1138,7 +1345,7 @@ def main():
         if nextclade_path and not os.path.exists(update_nextclade_input) and not os.path.exists(update_nextclade_input + ".gz"):
             print(f"No existing {update_nextclade_input} found; recreating it.")
             run_nextclade_on_existing(ncbi, starting_tree_accessions, nextclade_path, nextclade_clade_columns,
-                                      extra_fasta, ref_fasta)
+                                      extra_fasta, ref_fasta, args.no_genbank)
 
     # Get metadata from NCBI Virus API
     ncbi_virus_metadata, acc_to_length_segment = get_genbank_metadata(ncbi, taxid, args.no_genbank)
@@ -1165,9 +1372,14 @@ def main():
     nextclade_assignments, nextclade_clade_columns = run_nextclade(nextclade_path, nextclade_clade_columns,
                                                                    existing_nextclade_assignments, existing_column_count,
                                                                    genbank_fasta, extra_fasta, ref_fasta)
-    metadata_tsv, rename_tsv, date_min, date_max, extra_added_cols, extra_mapped_cols = \
-        finalize_metadata(ncbi_virus_metadata, nextclade_assignments, nextclade_clade_columns, ref_segment,
-                          sample_names, extra_fasta_names, extra_metadata, extra_metadata_date_column)
+    if update_metadata_input:
+        metadata_tsv, rename_tsv, date_min, date_max, extra_added_cols, extra_mapped_cols = \
+            finalize_metadata_update(update_metadata_input, ncbi_virus_metadata, nextclade_assignments, nextclade_clade_columns, ref_segment,
+                                     sample_names, extra_fasta_names, extra_metadata, extra_metadata_date_column)
+    else:
+        metadata_tsv, rename_tsv, date_min, date_max, extra_added_cols, extra_mapped_cols = \
+            finalize_metadata_ncbi(ncbi_virus_metadata, nextclade_assignments, nextclade_clade_columns, ref_segment,
+                                   sample_names, extra_fasta_names, extra_metadata, extra_metadata_date_column)
     viz_tree = rename_seqs(opt_tree, rename_tsv)
     dump_newick(viz_tree)
     write_output_stats(ref_acc, ref_length, gb_count, filtered_count, aligned_count, tree_tip_count)

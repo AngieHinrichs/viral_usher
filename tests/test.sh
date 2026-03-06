@@ -30,10 +30,16 @@ run_test tests/test_ehdv_4_extra_fasta.sh
 # Build from scratch with extra_fasta and extra_metadata
 run_test tests/test_ehdv_4_extra_fasta_metadata.sh
 
+# Use viral_usher_trees as a base, add extra_fasta and extra_metadata
+run_test tests/test_ehdv_4_extra_fasta_metadata_viral_usher_trees.sh
+
 # Build from scratch: PRRSV2 with nextclade annotations, no extra fasta
 run_test tests/test_prrsv2_nextclade.sh
 
 # Build from viral_usher_trees: PRRSV2 with nextclade annotations and extra fasta
 run_test tests/test_prrsv2_nextclade_extra_fasta.sh
+
+# Build from viral_usher_trees: PRRSV2 with nextclade annotations and extra fasta, no genbank
+run_test tests/test_prrsv2_nextclade_extra_fasta_no_genbank.sh
 
 echo Success

@@ -123,7 +123,8 @@ def parse_config(config_path, resolve_url_keys=True, no_genbank=False):
 
     if resolve_url_keys:
         # Resolve paths that can be URLs
-        url_resolvable_keys = ['ref_fasta', 'ref_gbff', 'extra_fasta', 'extra_metadata', 'update_tree_input', 'taxonium_overlay_html']
+        url_resolvable_keys = ['ref_fasta', 'ref_gbff', 'extra_fasta', 'extra_metadata', 'update_tree_input', 'update_metadata_input',
+                               'taxonium_overlay_html']
         for key in url_resolvable_keys:
             if key in config:
                 config[key] = handle_path_or_url(config[key])
