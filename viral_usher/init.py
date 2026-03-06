@@ -417,9 +417,11 @@ def get_user_fasta(args_fasta, is_interactive):
     return fasta
 
 
-def get_user_metadata(args_metadata, args_metadata_date_column, is_interactive):
+def get_user_metadata(args_metadata, args_metadata_date_column, fasta, is_interactive):
     metadata_path = ''
     metadata_date_column = ''
+    if not fasta:
+        return metadata_path, metadata_date_column
     if args_metadata:
         metadata_path = os.path.abspath(args_metadata)
         ok, error_message = check_optional_file_readable(metadata_path)
@@ -433,9 +435,18 @@ def get_user_metadata(args_metadata, args_metadata_date_column, is_interactive):
         sys.exit(1)
     elif is_interactive:
         metadata_path = prompt_with_checker("If you have your own metadata file (TSV) whose first column matches names in the FASTA file, then enter its path", "", check_optional_file_readable)
-        metadata_date_column = prompt_with_checker("If your metadata file has a column with sequence collection dates, enter its name (otherwise leave blank to look for a column named 'date')", "", lambda x: (True, None))
+        if metadata_path:
+            metadata_date_column = prompt_with_checker("If your metadata file has a column with sequence collection dates, enter its name (otherwise leave blank to look for a column named 'date')", "", lambda x: (True, None))
     return metadata_path, metadata_date_column
 
+
+def get_title(args_title, is_interactive):
+    title = ''
+    if args_title:
+        title = args_title
+    if is_interactive:
+        title = get_input(f"\nEnter a title for your tree (optional): ")
+    return title
 
 def get_workdir(args_workdir, is_interactive):
     if args_workdir:
@@ -571,7 +582,8 @@ def handle_init(args):
     max_parsimony = get_max_parsimony(args.max_parsimony, is_interactive)
     max_branch_length = get_max_branch_length(args.max_branch_length, is_interactive)
     fasta = get_user_fasta(args.fasta, is_interactive)
-    metadata, metadata_date_column = get_user_metadata(args.metadata, args.metadata_date_column, is_interactive)
+    metadata, metadata_date_column = get_user_metadata(args.metadata, args.metadata_date_column, fasta, is_interactive)
+    title = get_title(args.title, is_interactive)
     workdir = get_workdir(args.workdir, is_interactive)
 
     viral_usher_version = importlib.metadata.version('viral_usher')
@@ -595,6 +607,7 @@ def handle_init(args):
         "extra_metadata": metadata,
         "extra_metadata_date_column": metadata_date_column,
         "taxonium_overlay_html": args.taxonium_overlay_html if args.taxonium_overlay_html else "",
+        "title": title,
         "workdir": os.path.abspath(workdir),
     }
     config_path = make_config(config_contents, workdir, refseq_id, taxid, args.config, is_interactive)

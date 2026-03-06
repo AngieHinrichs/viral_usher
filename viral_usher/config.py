@@ -144,4 +144,8 @@ def write_config(config, config_path, check_paths=True, no_genbank=False):
         taxid_desc = f", taxonomy ID {config['taxonomy_id']}" if config.get('taxonomy_id') else ""
         print(f"# viral_usher config for {ref_desc}{taxid_desc}\n", file=f)
         for key in config:
-            print(f"{key} = '{config[key]}'", file=f)
+            val = config[key]
+            if "'" in str(val):
+                print(f"{key} = '''{val}'''", file=f)
+            else:
+                print(f"{key} = '{val}'", file=f)

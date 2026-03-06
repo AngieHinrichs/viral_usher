@@ -1185,7 +1185,7 @@ def usher_to_taxonium(pb_in, metadata_in, ref_gbff, tip_count, species, ref_acc,
     start_time = start_timing(f"Running usher_to_taxonium to make {jsonl_out}...")
     metadata_columns = get_header(metadata_in)
     columns = ','.join(metadata_columns)
-    title = f"{tip_count} {species} sequences from GenBank aligned to {ref_acc}"
+    title = config_contents.get('title', f"{tip_count} {species} sequences from GenBank aligned to {ref_acc}")
     got_extra_fasta = bool(config_contents.get('extra_fasta', ''))
     config = make_taxonium_config(date_min, date_max, metadata_columns)
     overlay_html = config_contents.get('taxonium_overlay_html', '')

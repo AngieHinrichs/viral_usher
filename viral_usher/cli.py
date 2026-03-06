@@ -29,6 +29,7 @@ def main():
     init_parser.add_argument("-n", "--max_N_proportion", type=float, help=f"Maximum proportion of N bases to allow in GenBank sequences (default: {config.DEFAULT_MAX_N_PROPORTION})")
     init_parser.add_argument("-a", "--max_parsimony", type=int, help=f"Remove sequences from the tree with parsimony score (private substitution count) greater than this (default: {config.DEFAULT_MAX_PARSIMONY})")
     init_parser.add_argument("-b", "--max_branch_length", type=int, help=f"Remove branches from the tree with branch length (substitution count) greater than this (default: {config.DEFAULT_MAX_BRANCH_LENGTH})")
+    init_parser.add_argument(      "--title", type=str, help="Title for the tree display")
     init_parser.add_argument("-w", "--workdir", help="Directory in which tree files will be built")
     init_parser.add_argument("-c", "--config", type=str, help="Path to config file output")
     init_parser.add_argument("--ref_fasta", type=str, help="Path to local reference genome FASTA file (if not using RefSeq)")
