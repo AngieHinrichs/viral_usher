@@ -860,7 +860,7 @@ def finalize_metadata_ncbi(ncbi_virus_metadata, nextclade_assignments, nextclade
         if extra_date_max is not None and (date_max is None or extra_date_max > date_max):
             date_max = extra_date_max
     finish_timing(start_time)
-    return metadata_out, rename_out, date_min, date_max, extra_added_cols, extra_mapped_cols
+    return metadata_out, rename_out, date_min, date_max
 
 
 def finalize_metadata_update(update_metadata_input, ncbi_virus_metadata,
@@ -1054,7 +1054,7 @@ def finalize_metadata_update(update_metadata_input, ncbi_virus_metadata,
             m_out.write(metadata_line)
 
     finish_timing(start_time)
-    return metadata_out, rename_out, date_min, date_max, extra_added_cols, extra_mapped_cols
+    return metadata_out, rename_out, date_min, date_max
 
 
 def rename_seqs(pb_in, rename_tsv):
@@ -1085,24 +1085,12 @@ def get_header(tsv_in):
     return header
 
 
-def make_taxonium_config(date_min, date_max, nextclade_clade_columns, got_extra_fasta, no_genbank, extra_added_cols,
-                         extra_mapped_cols):
-    """Make a config file with a color gradient from date_min to date_max."""
+def make_taxonium_config(date_min, date_max, metadata_columns):
+    """Make a config file with a color gradient from date_min to date_max, and colorBy options for metadata columns,
+    excluding strain and several GenBank columns that are not suitable for categorical coloring."""
     config_out = "taxonium_config.json"
-    if no_genbank:
-        color_by_options = []
-        if extra_mapped_cols:
-            color_by_options += ["meta_" + col for col in extra_mapped_cols.keys()]
-        if 'date' in extra_mapped_cols:
-            color_by_options.append("meta_num_date")
-    else:
-        color_by_options = ["meta_country", "meta_location", "meta_num_date", "meta_host", "meta_serotype"]
-        if got_extra_fasta is not None:
-            color_by_options.append("meta_source")
-    if nextclade_clade_columns:
-        color_by_options += ["meta_" + col for col in get_nextclade_column_list(nextclade_clade_columns)]
-    if extra_added_cols:
-        color_by_options += ["meta_" + col for col in extra_added_cols]
+    exclude_cols = ['strain', 'accession', 'isolate', 'gb_strain', 'date', 'length', 'biosample', 'authors']
+    color_by_options = ['meta_' + col for col in metadata_columns if col not in exclude_cols]
     color_by_options += ["genotype", "None"]
     config = {"colorRamps": {"meta_num_date": {"scale": [[date_min, "#0000F8"], [date_max, "#F80000"]]}},
               "customNames": {"meta_num_date": "Date (numeric)",
@@ -1192,14 +1180,14 @@ def make_taxonium_overlay_html(config_contents, ref_acc, no_genbank, got_extra_f
 
 
 def usher_to_taxonium(pb_in, metadata_in, ref_gbff, tip_count, species, ref_acc, date_min, date_max,
-                      nextclade_clade_columns, no_genbank, extra_added_cols, extra_mapped_cols, config_contents):
+                      no_genbank, config_contents):
     jsonl_out = "tree.jsonl.gz"
     start_time = start_timing(f"Running usher_to_taxonium to make {jsonl_out}...")
-    columns = ','.join(get_header(metadata_in))
+    metadata_columns = get_header(metadata_in)
+    columns = ','.join(metadata_columns)
     title = f"{tip_count} {species} sequences from GenBank aligned to {ref_acc}"
     got_extra_fasta = bool(config_contents.get('extra_fasta', ''))
-    config = make_taxonium_config(date_min, date_max, nextclade_clade_columns, got_extra_fasta, no_genbank,
-                                  extra_added_cols, extra_mapped_cols)
+    config = make_taxonium_config(date_min, date_max, metadata_columns)
     overlay_html = config_contents.get('taxonium_overlay_html', '')
     if not overlay_html:
         overlay_html = make_taxonium_overlay_html(config_contents, ref_acc, no_genbank, got_extra_fasta)
@@ -1373,18 +1361,18 @@ def main():
                                                                    existing_nextclade_assignments, existing_column_count,
                                                                    genbank_fasta, extra_fasta, ref_fasta)
     if update_metadata_input:
-        metadata_tsv, rename_tsv, date_min, date_max, extra_added_cols, extra_mapped_cols = \
+        metadata_tsv, rename_tsv, date_min, date_max = \
             finalize_metadata_update(update_metadata_input, ncbi_virus_metadata, nextclade_assignments, nextclade_clade_columns, ref_segment,
                                      sample_names, extra_fasta_names, extra_metadata, extra_metadata_date_column)
     else:
-        metadata_tsv, rename_tsv, date_min, date_max, extra_added_cols, extra_mapped_cols = \
+        metadata_tsv, rename_tsv, date_min, date_max = \
             finalize_metadata_ncbi(ncbi_virus_metadata, nextclade_assignments, nextclade_clade_columns, ref_segment,
                                    sample_names, extra_fasta_names, extra_metadata, extra_metadata_date_column)
     viz_tree = rename_seqs(opt_tree, rename_tsv)
     dump_newick(viz_tree)
     write_output_stats(ref_acc, ref_length, gb_count, filtered_count, aligned_count, tree_tip_count)
     usher_to_taxonium(viz_tree, metadata_tsv, ref_gbff, tree_tip_count, species, ref_acc, date_min, date_max,
-                      nextclade_clade_columns, args.no_genbank, extra_added_cols, extra_mapped_cols, config_contents)
+                      args.no_genbank, config_contents)
 
 
 if __name__ == "__main__":
