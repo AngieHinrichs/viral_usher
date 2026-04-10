@@ -25,6 +25,8 @@ def main():
     init_parser.add_argument("-m", "--metadata", help="Metadata file (TSV): first column must match names in --fasta file)")
     init_parser.add_argument("--metadata_date_column", help="Column in metadata file containing sequence collection date (default: look for 'date')")
     init_parser.add_argument("-x", "--nextclade_dataset", help="Nextclade dataset path (e.g. 'nextstrain/dengue/all') (default: auto-detect)")
+    init_parser.add_argument("--annotate_allele_frequency", type=float, help="matUtils annotate --allele_frequency parameter (only used with --nextclade_dataset; default: no annotation)")
+    init_parser.add_argument("--annotate_mask_frequency", type=float, help="matUtils annotate --mask_frequency parameter (only used with --nextclade_dataset; default: no annotation)")
     init_parser.add_argument("-l", "--min_length_proportion", type=float, help=f"Minimum proportion of RefSeq length to require for GenBank sequences (default: {config.DEFAULT_MIN_LENGTH_PROPORTION})")
     init_parser.add_argument("-n", "--max_N_proportion", type=float, help=f"Maximum proportion of N bases to allow in GenBank sequences (default: {config.DEFAULT_MAX_N_PROPORTION})")
     init_parser.add_argument("-a", "--max_parsimony", type=int, help=f"Remove sequences from the tree with parsimony score (private substitution count) greater than this (default: {config.DEFAULT_MAX_PARSIMONY})")

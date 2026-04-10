@@ -348,6 +348,41 @@ def get_viral_usher_trees_refs(tree_name):
         sys.exit(1)
 
 
+def get_annotate_options(args, nextclade_path, is_interactive):
+    """If nextclade_path is given, then check options / prompt user for matUtils annotate options.  If nextclade_path is not given, it's an error for the options to be given."""
+    annotate_allele_frequency = ''
+    annotate_mask_frequency = ''
+    if nextclade_path:
+        if args.annotate_allele_frequency is not None and args.annotate_mask_frequency is not None:
+            annotate_allele_frequency = args.annotate_allele_frequency
+            annotate_mask_frequency = args.annotate_mask_frequency
+            ok, error_message = check_proportion(annotate_allele_frequency)
+            if not ok:
+                print(f"{error_message}\nPlease try again with a different value for --annotate_allele_frequency", file=sys.stderr)
+                sys.exit(1)
+            ok, error_message = check_proportion(annotate_mask_frequency)
+            if not ok:
+                print(f"{error_message}\nPlease try again with a different value for --annotate_mask_frequency", file=sys.stderr)
+                sys.exit(1)
+        elif args.annotate_allele_frequency or args.annotate_mask_frequency:
+            print("Error: if either --annotate_allele_frequency or --annotate_mask_frequency is given, then the other must also "
+                  "be given.", file=sys.stderr)
+            sys.exit(1)
+        elif is_interactive:
+            print("\nSince you have selected a Nextclade dataset, you may choose to run 'matUtils annotate' to add clade labels to "
+                  "the tree, using allele frequency and mask frequency parameters that you provide.  This adds significant run time, "
+                  "especially for highly diverged viruses and/or large trees.")
+            choice = get_input("Would you like to add clade labels to the tree? (y/n) [y]: ") or "y"
+            if choice.lower().startswith('y'):
+                annotate_allele_frequency = prompt_with_checker("Enter matUtils annotate --allele-frequency parameter (e.g. 0.99)", "0.99", check_proportion)
+                annotate_mask_frequency = prompt_with_checker("Enter matUtils annotate --mask-frequency parameter (e.g. 0.01)", "0.01", check_proportion)
+    else:
+        if args.annotate_allele_frequency is not None or args.annotate_mask_frequency is not None:
+            print("Error: --annotate_allele_frequency and --annotate_mask_frequency options can only be used if a Nextclade dataset is selected with -x/--nextclade_dataset.", file=sys.stderr)
+            sys.exit(1)
+    return annotate_allele_frequency, annotate_mask_frequency
+
+
 def get_min_length_proportion(args_min_length_proportion, is_interactive):
     min_length_proportion = config.DEFAULT_MIN_LENGTH_PROPORTION
     if args_min_length_proportion:
@@ -577,6 +612,7 @@ def handle_init(args):
         update_tree_input = ""
         update_metadata_input = ""
     nextclade_path, nextclade_columns = get_nextclade_path_columns(args.nextclade_dataset, species, is_interactive)
+    annotate_allele_frequency, annotate_mask_frequency = get_annotate_options(args, nextclade_path, is_interactive)
     min_length_proportion = get_min_length_proportion(args.min_length_proportion, is_interactive)
     max_N_proportion = get_max_N_proportion(args.max_N_proportion, is_interactive)
     max_parsimony = get_max_parsimony(args.max_parsimony, is_interactive)
@@ -603,6 +639,8 @@ def handle_init(args):
         "max_N_proportion": max_N_proportion,
         "max_parsimony": max_parsimony,
         "max_branch_length": max_branch_length,
+        "annotate_allele_frequency": annotate_allele_frequency,
+        "annotate_mask_frequency": annotate_mask_frequency,
         "extra_fasta": fasta,
         "extra_metadata": metadata,
         "extra_metadata_date_column": metadata_date_column,

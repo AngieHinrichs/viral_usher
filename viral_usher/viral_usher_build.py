@@ -441,7 +441,7 @@ def run_matoptimize(pb_file, vcf_file, update):
 
 def run_matutils_filter(opt_unfiltered_tree, max_parsimony, max_branch_length):
     """Run matUtils extract to filter sequences/branches and collapse tree post-matOptimize"""
-    pb_out = optimized_pb
+    pb_out = 'optimized.unannotated.pb.gz'
     sample_names_out = 'tree_samples.txt'
     start_time = start_timing(f"Running matUtils to filter (--max-parsimony {max_parsimony} --max-branch-length {max_branch_length})...")
     command = ['matUtils', 'extract', '-i', opt_unfiltered_tree,
@@ -542,6 +542,33 @@ def run_nextclade(nextclade_path, nextclade_clade_columns, existing_nextclade_as
                 if acc not in new_assignments:
                     print(acc + "\t" + "\t".join(clade_columns), file=tsv_out)
     return nextclade_assignments, nextclade_clade_columns
+
+
+def run_matutils_annotate(unannotated_tree, nextclade_assignments, annotate_allele_frequency, annotate_mask_frequency):
+    """Run matUtils annotate to add Nextclade clade labels to the tree, as a final step to make optimized.pb.gz."""
+    pb_out = optimized_pb
+    if nextclade_assignments and annotate_allele_frequency and annotate_mask_frequency:
+        # Write the clade assignments to a file to be read by matUtils annotate: no header, clade in first column, sample name in second column, tab-separated
+        clade_to_name = 'clade_to_name.tsv'
+        with open(clade_to_name, 'w') as tsv_out:
+            for acc, clades in nextclade_assignments.items():
+                if clades and clades[0] and clades[0] != 'unassigned':
+                    clade = clades[0]
+                    print(clade + "\t" + acc, file=tsv_out)
+        start_time = start_timing("Running matUtils annotate to add Nextclade clade labels to the tree...")
+        command = ['matUtils', 'annotate',
+                   '-i', unannotated_tree,
+                   '--clear-current',
+                   '--clade-names', clade_to_name,
+                   '--allele-frequency', annotate_allele_frequency,
+                   '--mask-frequency', annotate_mask_frequency,
+                   '-o', pb_out]
+        run_command(command, stdout_filename='matUtils.annotate.out.log', stderr_filename='matUtils.annotate.err.log')
+        finish_timing(start_time)
+    else:
+        # No clade assignments to annotate, or no allele/mask frequency specified, just copy the file
+        shutil.copyfile(unannotated_tree, pb_out)
+    return pb_out
 
 
 def get_extra_metadata(extra_metadata):
@@ -1191,18 +1218,17 @@ def usher_to_taxonium(pb_in, metadata_in, ref_gbff, tip_count, species, ref_acc,
     overlay_html = config_contents.get('taxonium_overlay_html', '')
     if not overlay_html:
         overlay_html = make_taxonium_overlay_html(config_contents, ref_acc, no_genbank, got_extra_fasta)
-    command = ['usher_to_taxonium', '--input', pb_in, '--metadata', metadata_in,
-               '--columns', columns, '--title', title, '--config_json', config,
-               '--overlay_html', overlay_html,
-               '--genbank', ref_gbff, '--output', jsonl_out]
-    if not run_command(command, stdout_filename='utt.out.log', stderr_filename='utt.err.log', fail_ok=True):
+    command_no_genbank = ['usher_to_taxonium', '--input', pb_in, '--metadata', metadata_in,
+                          '--columns', columns, '--title', title, '--config_json', config,
+                          '--overlay_html', overlay_html,
+                          '--output', jsonl_out]
+    if 'nextclade_clade' in metadata_columns:
+        command_no_genbank += ['--clade_types', 'pango']
+    command_with_genbank = command_no_genbank + ['--genbank', ref_gbff]
+    if not run_command(command_with_genbank, stdout_filename='utt.out.log', stderr_filename='utt.err.log', fail_ok=True):
         finish_timing(start_time)
         start_time = start_timing("usher_to_taxonium failed with --genbank, trying again without --genbank...")
-        command = ['usher_to_taxonium', '--input', pb_in, '--metadata', metadata_in,
-                   '--columns', columns, '--title', title, '--config_json', config,
-                   '--overlay_html', overlay_html,
-                   '--output', jsonl_out]
-        run_command(command, stdout_filename='utt.out.log', stderr_filename='utt.err.log')
+        run_command(command_no_genbank, stdout_filename='utt.out.log', stderr_filename='utt.err.log')
     finish_timing(start_time)
     return jsonl_out
 
@@ -1227,6 +1253,22 @@ def get_tree_names(pb_in):
             tree_names.add(line.strip())
     finish_timing(start_time)
     return tree_names
+
+
+def check_annotate_options(annotate_allele_frequency, annotate_mask_frequency):
+    """Check that if either is given, then both are given and are valid floats between 0 and 1."""
+    if (annotate_allele_frequency and not annotate_mask_frequency) or (annotate_mask_frequency and not annotate_allele_frequency):
+        print("Error: if either --annotate_allele_frequency or --annotate_mask_frequency is given, then both must be given.", file=sys.stderr)
+        sys.exit(1)
+    if annotate_allele_frequency and annotate_mask_frequency:
+        try:
+            af = float(annotate_allele_frequency)
+            mf = float(annotate_mask_frequency)
+            if not (0 <= af <= 1) or not (0 <= mf <= 1):
+                raise ValueError
+        except ValueError:
+            print("Error: --annotate_allele_frequency and --annotate_mask_frequency must be floats between 0 and 1.", file=sys.stderr)
+            sys.exit(1)
 
 
 def find_new_accessions(tree_names, acc_to_length_segment, min_length, ref_segment):
@@ -1299,6 +1341,8 @@ def main():
     max_N_proportion = float(config_contents.get('max_N_proportion', config.DEFAULT_MAX_N_PROPORTION))
     max_parsimony = int(config_contents.get('max_parsimony', str(config.DEFAULT_MAX_PARSIMONY)))
     max_branch_length = int(config_contents.get('max_branch_length', str(config.DEFAULT_MAX_BRANCH_LENGTH)))
+    annotate_allele_frequency = config_contents.get('annotate_allele_frequency', '')
+    annotate_mask_frequency = config_contents.get('annotate_mask_frequency', '')
     extra_fasta = config_contents.get('extra_fasta', '')
     extra_metadata = config_contents.get('extra_metadata', '')
     extra_metadata_date_column = config_contents.get('extra_metadata_date_column', '')
@@ -1306,6 +1350,7 @@ def main():
     update_metadata_input = config_contents.get('update_metadata_input', '')
     if update_tree_input == "":
         update_tree_input = optimized_pb
+    check_annotate_options(annotate_allele_frequency, annotate_mask_frequency)
     # Force update mode if non-default update_tree_input is given
     do_update = True if update_tree_input != optimized_pb else args.update
     species = config_contents.get('species', None)
@@ -1355,11 +1400,12 @@ def main():
         empty_tree = make_empty_tree()
         preopt_tree = run_usher_sampled(empty_tree, msa_vcf)
     opt_unfiltered_tree = run_matoptimize(preopt_tree, msa_vcf, do_update)
-    opt_tree, sample_names, tree_tip_count = run_matutils_filter(opt_unfiltered_tree, max_parsimony, max_branch_length)
+    opt_unannotated_tree, sample_names, tree_tip_count = run_matutils_filter(opt_unfiltered_tree, max_parsimony, max_branch_length)
     existing_nextclade_assignments, existing_column_count = get_existing_nextclade_assignments(do_update, starting_tree_accessions, nextclade_path)
     nextclade_assignments, nextclade_clade_columns = run_nextclade(nextclade_path, nextclade_clade_columns,
                                                                    existing_nextclade_assignments, existing_column_count,
                                                                    genbank_fasta, extra_fasta, ref_fasta)
+    opt_tree = run_matutils_annotate(opt_unannotated_tree, nextclade_assignments, annotate_allele_frequency, annotate_mask_frequency)
     if update_metadata_input:
         metadata_tsv, rename_tsv, date_min, date_max = \
             finalize_metadata_update(update_metadata_input, ncbi_virus_metadata, nextclade_assignments, nextclade_clade_columns, ref_segment,
