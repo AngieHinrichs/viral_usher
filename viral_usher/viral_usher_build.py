@@ -1221,6 +1221,7 @@ def usher_to_taxonium(pb_in, metadata_in, ref_gbff, tip_count, species, ref_acc,
     command_no_genbank = ['usher_to_taxonium', '--input', pb_in, '--metadata', metadata_in,
                           '--columns', columns, '--title', title, '--config_json', config,
                           '--overlay_html', overlay_html,
+                          '--name_internal_nodes',
                           '--output', jsonl_out]
     if 'nextclade_clade' in metadata_columns:
         command_no_genbank += ['--clade_types', 'pango']
