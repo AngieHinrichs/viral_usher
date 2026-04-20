@@ -322,7 +322,9 @@ def get_viral_usher_trees_name(refseq_acc, args_use_viral_usher_trees, is_intera
             print(f"\nUsing pre-built tree for RefSeq {refseq_acc} from viral_usher_trees repository:\n{tree_name}")
             return tree_name
         elif is_interactive:
-            print(f"\nA pre-built tree using RefSeq {refseq_acc} is available at:\n{tree_name}")
+            print(f"\nA pre-built tree using a modified version of RefSeq {refseq_acc} is available at:\n{tree_name}")
+            print("The modified RefSeq corresponds to a rerooted version of the tree built using the original RefSeq,")
+            print("and can be downloaded from the same location if you need the tree's root/reference sequence.")
             choice = get_input("Would you like to use this tree instead of building a new one? (y/n) [y]: ") or "y"
             if choice.lower().startswith('y'):
                 print(f"Okay, using {tree_name} as a starting tree.")
