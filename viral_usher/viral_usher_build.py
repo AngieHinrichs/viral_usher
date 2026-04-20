@@ -331,7 +331,7 @@ def get_extra_fasta_names(extra_fasta):
         return None
 
 
-def align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, max_N_proportion):
+def align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, max_N_proportion, ref_segment):
     """Run nextclade to align the filtered sequences to the reference, and pipe its output to faToVcf and gzip."""
     msa_vcf_gz = 'msa.vcf.gz'
     nextclade_err_txt = 'nextclade.align.err.log'
@@ -341,6 +341,7 @@ def align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, 
         'nextclade', 'run', '--input-ref', ref_fasta, '--include-reference', 'true', '--output-fasta', '/dev/stdout'
     ]
     fatovcf_cmd = ['faToVcf', '-includeNoAltN', '-ref=' + ref_acc, 'stdin', 'stdout']
+    extra_passed_filters_count = 0
     with gzip.open(msa_vcf_gz, 'wb') as vcf_out, open(nextclade_err_txt, 'wb') as nextclade_stderr:
         try:
             # Start nextclade
@@ -351,6 +352,7 @@ def align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, 
             # Send fasta input(s) to nextclade_proc's stdin.  If extra_fasta duplicates sequences
             # also found in genbank_fasta, prefer the ones in extra_fasta.
             extra_ids = dict()
+            extra_filtered = []
             if extra_fasta:
                 with open_maybe_decompress(extra_fasta) as ef:
                     for record in SeqIO.parse(ef, 'fasta'):
@@ -362,8 +364,10 @@ def align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, 
                             extra_ids[record.id] = True
                             length = len(record.seq)
                             if length < min_length or not passes_seq_filter(record, length, max_N_proportion):
+                                extra_filtered.append(record.id)
                                 continue
                             nextclade_proc.stdin.write(record_to_fasta_bytes(record))
+                            extra_passed_filters_count += 1
             # genbank_fasta has already been filtered for length & Ns, but discard duplicates
             with open_maybe_decompress(genbank_fasta) as gf:
                 for record in SeqIO.parse(gf, 'fasta'):
@@ -372,6 +376,9 @@ def align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, 
                     else:
                         nextclade_proc.stdin.write(record_to_fasta_bytes(record))
             nextclade_proc.stdin.close()
+            if extra_filtered:
+                print(f"Filtered out {len(extra_filtered)} sequences from {extra_fasta} that were shorter than {min_length} or "
+                      f"had more than {max_N_proportion:.0%} Ns, e.g. {extra_filtered[0]}", file=sys.stderr)
             # Write faToVcf's output to gzip file
             for chunk in iter(lambda: fatovcf_proc.stdout.read(8192), b''):
                 vcf_out.write(chunk)
@@ -387,12 +394,22 @@ def align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, 
     run_command(['gzip', '-f', nextclade_err_txt])
     # Count the number of samples in the #CHROM header line of msa.vcf.gz
     aligned_count = 0
+    extra_aligned_count = 0
     with gzip.open(msa_vcf_gz, 'rt') as vcf_in:
         for line in vcf_in:
             if line.startswith('#CHROM'):
                 header = line.strip().split('\t')
-                aligned_count = len(header) - 9  # Subtract fixed columns
+                aligned = header[9:]
+                for name in aligned:
+                    if name in extra_ids:
+                        extra_aligned_count += 1
+                aligned_count = len(aligned)
                 break
+    extra_unaligned_count = extra_passed_filters_count - extra_aligned_count
+    if extra_unaligned_count > 0:
+        segment = f" (segment {ref_segment})" if ref_segment else ""
+        print(f"Warning: {extra_unaligned_count} sequences of {extra_passed_filters_count} from {extra_fasta} passed filters but "
+              f"failed to align to reference {ref_acc}{segment} with nextclade and will not be included in the tree.", file=sys.stderr)
     finish_timing(start_time)
     return msa_vcf_gz, aligned_count
 
@@ -1390,7 +1407,7 @@ def main():
         extra_fasta = get_new_extra_fasta(starting_tree_accessions, extra_fasta)
 
     # The core of the pipeline: align sequences, build tree, finalize metadata
-    msa_vcf, aligned_count = align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, max_N_proportion)
+    msa_vcf, aligned_count = align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, max_N_proportion, ref_segment)
     if do_update:
         if aligned_count == 0:
             preopt_tree = "usher_sampled.pb.gz"
