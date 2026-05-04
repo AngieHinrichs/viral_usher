@@ -45,6 +45,7 @@ def main():
     build_parser.add_argument("-d", "--docker_image", type=str, help=f"Use this docker image instead of docker.io/{config.DEFAULT_DOCKER_IMAGE}")
     build_parser.add_argument("-n", "--no_genbank", action="store_true", help="Do not download sequences from GenBank; build tree using only sequences in extra_fasta")
     build_parser.add_argument("-u", "--update", action="store_true", help="Update an existing tree with new sequences (requires optimized.pb.gz tree from previous build)")
+    build_parser.add_argument("--threads", type=int, default=0, help="Number of threads to use for alignment and tree building steps (default: 0, use all available cores)")
 
     args = parser.parse_args()
 

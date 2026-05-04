@@ -124,7 +124,7 @@ def localize_config(args_config, config_contents, no_genbank):
     return config_rel
 
 
-def run_in_docker(workdir, config_rel, args_docker_image, args_update, args_no_genbank):
+def run_in_docker(workdir, config_rel, args_docker_image, args_update, args_no_genbank, args_threads):
     """Start up a docker container that runs the pipeline."""
     docker_client = docker.from_env()
     user_id = os.getuid()
@@ -135,6 +135,8 @@ def run_in_docker(workdir, config_rel, args_docker_image, args_update, args_no_g
         command.append("--update")
     if args_no_genbank:
         command.append("--no_genbank")
+    if args_threads:
+        command += ["--threads", str(args_threads)]
     try:
         container = docker_client.containers.run(
             docker_image,
@@ -179,7 +181,7 @@ def handle_build(args):
         sys.exit(1)
     config_rel = localize_config(args.config, config_contents, args.no_genbank)
     workdir = config_contents['workdir']
-    run_in_docker(workdir, config_rel, args.docker_image, args.update, args.no_genbank)
+    run_in_docker(workdir, config_rel, args.docker_image, args.update, args.no_genbank, args.threads)
     if os.path.exists(f"{workdir}/tree.jsonl.gz"):
         print(f"Success -- you can view {workdir}/tree.jsonl.gz using https://taxonium.org/ now.")
     else:

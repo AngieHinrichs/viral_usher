@@ -331,7 +331,7 @@ def get_extra_fasta_names(extra_fasta):
         return None
 
 
-def align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, max_N_proportion, ref_segment):
+def align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, max_N_proportion, ref_segment, threads):
     """Run nextclade to align the filtered sequences to the reference, and pipe its output to faToVcf and gzip."""
     msa_vcf_gz = 'msa.vcf.gz'
     nextclade_err_txt = 'nextclade.align.err.log'
@@ -340,6 +340,8 @@ def align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, 
     nextclade_cmd = [
         'nextclade', 'run', '--input-ref', ref_fasta, '--include-reference', 'true', '--output-fasta', '/dev/stdout'
     ]
+    if threads:
+        nextclade_cmd += ['--jobs', str(threads)]
     fatovcf_cmd = ['faToVcf', '-includeNoAltN', '-ref=' + ref_acc, 'stdin', 'stdout']
     extra_passed_filters_count = 0
     with gzip.open(msa_vcf_gz, 'wb') as vcf_out, open(nextclade_err_txt, 'wb') as nextclade_stderr:
@@ -422,23 +424,27 @@ def make_empty_tree():
     return empty_tree_path
 
 
-def run_usher_sampled(tree, vcf):
+def run_usher_sampled(tree, vcf, threads):
     """Build the tree.  Use docker --platform linux/amd64 so this will work even on Mac with ARM CPU. """
     pb_out = 'usher_sampled.pb.gz'
     start_time = start_timing(f"Running usher-sampled on {vcf}...")
     tree_flag = "-t" if tree.endswith('.nwk') else "-i"
     command = ['usher-sampled', '-A', '-e', '5', tree_flag, tree, '-v', vcf, '-o', pb_out,
                '--optimization_radius', '0', '--batch_size_per_process', '100']
+    if threads:
+        command += ["--threads", str(threads)]
     run_command(command, stdout_filename='usher-sampled.out.log', stderr_filename='usher-sampled.err.log')
     finish_timing(start_time)
     return pb_out
 
 
-def run_matoptimize(pb_file, vcf_file, update):
+def run_matoptimize(pb_file, vcf_file, update, threads):
     """Run matOptimize to clean up after usher-sampled"""
     pb_out = 'optimized.unfiltered.pb.gz'
     start_time = start_timing(f"Running matOptimize on {pb_file}...")
     command_no_vcf = ['matOptimize', '-m', '0.00000001', '-M', '1', '-i', pb_file, '-o', pb_out]
+    if threads:
+        command_no_vcf += ["--threads", str(threads)]
     # Unless we're doing an update, in which case the VCF covers only the new sequences,
     # first try with VCF, which is less tested but should give better results because it includes
     # info about which bases are ambiguous or N.  That info is lost when usher imputes values.
@@ -507,7 +513,8 @@ def get_existing_nextclade_assignments(update, starting_tree_accessions, nextcla
     return existing_assignments, existing_column_count
 
 
-def run_nextclade(nextclade_path, nextclade_clade_columns, existing_nextclade_assignments, existing_column_count, genbank_fasta, extra_fasta, ref_fasta):
+def run_nextclade(nextclade_path, nextclade_clade_columns, existing_nextclade_assignments, existing_column_count,
+                  genbank_fasta, extra_fasta, ref_fasta, threads):
     """Run nextclade to assign sequences to clades.  Return dict mapping accession to clade."""
     if not nextclade_path:
         return {}, ""
@@ -523,8 +530,10 @@ def run_nextclade(nextclade_path, nextclade_clade_columns, existing_nextclade_as
     command = ['nextclade', 'run',
                '--dataset-name', nextclade_path,
                '--output-columns-selection', output_columns,
-               '--output-tsv', nextclade_tsv,
-               genbank_fasta, ref_fasta]
+               '--output-tsv', nextclade_tsv]
+    if threads:
+        command += ['--jobs', str(threads)]
+    command += [genbank_fasta, ref_fasta]
     if extra_fasta:
         command.append(extra_fasta)
     run_command(command, stdout_filename='nextclade.clade.out.log', stderr_filename='nextclade.clade.err.log')
@@ -1323,7 +1332,7 @@ def get_new_extra_fasta(tree_names, extra_fasta):
 
 
 def run_nextclade_on_existing(ncbi, starting_tree_accessions, nextclade_path, nextclade_clade_columns,
-                              extra_fasta, ref_fasta, no_genbank):
+                              extra_fasta, ref_fasta, no_genbank, threads):
     """Download GenBank sequences that are already in the tree unless --no_genbank.  Run nextclade on those plus extra_fasta."""
     if no_genbank:
         old_genbank_fasta = "/dev/null"
@@ -1335,7 +1344,7 @@ def run_nextclade_on_existing(ncbi, starting_tree_accessions, nextclade_path, ne
         os.remove(old_genbank_zip)
         finish_timing(start_time)
     print("Running nextclade on genomes that were already in the tree.")
-    run_nextclade(nextclade_path, nextclade_clade_columns, {}, None, old_genbank_fasta, extra_fasta, ref_fasta)
+    run_nextclade(nextclade_path, nextclade_clade_columns, {}, None, old_genbank_fasta, extra_fasta, ref_fasta, threads)
     if not os.path.exists(update_nextclade_input):
         print(f"Expected {update_nextclade_input} to be created but it's not found.", sys.stderr)
         sys.exit(1)
@@ -1347,6 +1356,8 @@ def main():
     parser.add_argument("--no_genbank", action="store_true", help="Skip downloading sequences from GenBank; use only extra_fasta")
     parser.add_argument("--update", action="store_true",
                         help="Add only new sequences to existing tree instead of building tree from scratch")
+    parser.add_argument("--threads", type=int, default=0,
+                        help="Number of threads to use for alignment and tree building steps (default: 0, use all available cores)")
 
     args = parser.parse_args()
 
@@ -1396,7 +1407,7 @@ def main():
         if nextclade_path and not os.path.exists(update_nextclade_input) and not os.path.exists(update_nextclade_input + ".gz"):
             print(f"No existing {update_nextclade_input} found; recreating it.")
             run_nextclade_on_existing(ncbi, starting_tree_accessions, nextclade_path, nextclade_clade_columns,
-                                      extra_fasta, ref_fasta, args.no_genbank)
+                                      extra_fasta, ref_fasta, args.no_genbank, args.threads)
 
     # Get metadata from NCBI Virus API
     ncbi_virus_metadata, acc_to_length_segment = get_genbank_metadata(ncbi, taxid, args.no_genbank)
@@ -1407,22 +1418,23 @@ def main():
         extra_fasta = get_new_extra_fasta(starting_tree_accessions, extra_fasta)
 
     # The core of the pipeline: align sequences, build tree, finalize metadata
-    msa_vcf, aligned_count = align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, max_N_proportion, ref_segment)
+    msa_vcf, aligned_count = align_sequences(ref_fasta, extra_fasta, genbank_fasta, ref_acc, min_length, max_N_proportion,
+                                             ref_segment, args.threads)
     if do_update:
         if aligned_count == 0:
             preopt_tree = "usher_sampled.pb.gz"
             shutil.copy(update_tree_input, preopt_tree)
         else:
-            preopt_tree = run_usher_sampled(update_tree_input, msa_vcf)
+            preopt_tree = run_usher_sampled(update_tree_input, msa_vcf, args.threads)
     else:
         empty_tree = make_empty_tree()
-        preopt_tree = run_usher_sampled(empty_tree, msa_vcf)
-    opt_unfiltered_tree = run_matoptimize(preopt_tree, msa_vcf, do_update)
+        preopt_tree = run_usher_sampled(empty_tree, msa_vcf, args.threads)
+    opt_unfiltered_tree = run_matoptimize(preopt_tree, msa_vcf, do_update, args.threads)
     opt_unannotated_tree, sample_names, tree_tip_count = run_matutils_filter(opt_unfiltered_tree, max_parsimony, max_branch_length)
     existing_nextclade_assignments, existing_column_count = get_existing_nextclade_assignments(do_update, starting_tree_accessions, nextclade_path)
     nextclade_assignments, nextclade_clade_columns = run_nextclade(nextclade_path, nextclade_clade_columns,
                                                                    existing_nextclade_assignments, existing_column_count,
-                                                                   genbank_fasta, extra_fasta, ref_fasta)
+                                                                   genbank_fasta, extra_fasta, ref_fasta, args.threads)
     opt_tree = run_matutils_annotate(opt_unannotated_tree, nextclade_assignments, annotate_allele_frequency, annotate_mask_frequency)
     if update_metadata_input:
         metadata_tsv, rename_tsv, date_min, date_max = \
