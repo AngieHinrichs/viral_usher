@@ -9,14 +9,14 @@
 - Subcommands:
   - `init`: Generate a config file (interactive or via command line options)
   - `build`: Download sequences and build a tree, guided by the config file
-- Uses [Docker](https://www.docker.com/) for portability to laptops, servers, or cloud platforms
+- Uses a container (either [Apptainer](https://apptainer.org/) or [Docker](https://www.docker.com/) for portability to laptops, servers, or cloud platforms
 
 ---
 
 ## 📦 Installation
 
 0. Install prerequisites (if not already installed)
-- [Docker](https://www.docker.com/)
+- Either [Apptainer](https://apptainer.org/) or [Docker](https://www.docker.com/)
 - [Python](https://www.python.org/) version 3.11 or later (we highly recommend using an environment manager such as [venv](https://docs.python.org/3/library/venv.html), [miniconda](https://www.anaconda.com/docs/getting-started/miniconda/main), [mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html) etc.)
 
 1. Install with pip (again, we highly recommended using an environment manager):
