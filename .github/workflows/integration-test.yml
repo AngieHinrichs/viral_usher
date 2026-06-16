@@ -38,7 +38,7 @@ jobs:
         tags: angiehinrichs/viral_usher:development
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        outputs: type=oci,dest=/tmp/viral_usher_apptainer
+        outputs: type=oci,dest=/tmp/viral_usher_apptainer.tar
 
     - name: Set up Python
       uses: actions/setup-python@v6
@@ -63,7 +63,7 @@ jobs:
 
     - name: Run test script with apptainer
       env:
-        APPTAINER_CONTAINER: oci:///tmp/viral_usher_apptainer
+        APPTAINER_CONTAINER: oci-archive:///tmp/viral_usher_apptainer.tar
       run: |
         apptainer --version
         mkdir -p tests/test_data/output
