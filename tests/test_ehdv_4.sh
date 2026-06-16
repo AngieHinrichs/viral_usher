@@ -16,13 +16,14 @@ time viral_usher init \
     -w $workdir \
     -c $workdir/config.toml
 
+CONTAINER_IMAGE=${APPTAINER_CONTAINER:-angiehinrichs/viral_usher:development}
 time viral_usher build \
-    -d angiehinrichs/viral_usher:development \
+    -d $CONTAINER_IMAGE \
     -c $workdir/config.toml
 
 # Now run build on the same config, but with --update
 time viral_usher build \
-    -d angiehinrichs/viral_usher:development \
+    -d $CONTAINER_IMAGE \
     -c $workdir/config.toml \
     -u
 

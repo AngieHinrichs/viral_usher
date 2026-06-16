@@ -19,8 +19,9 @@ time viral_usher init \
     -c $workdir/config.toml
 
 # I think --update is forced by --use_viral_usher_trees but use it anyway
+CONTAINER_IMAGE=${APPTAINER_CONTAINER:-angiehinrichs/viral_usher:development}
 time viral_usher build \
-    -d angiehinrichs/viral_usher:development \
+    -d $CONTAINER_IMAGE \
     -c $workdir/config.toml \
     -u
 

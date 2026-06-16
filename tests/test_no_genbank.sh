@@ -18,7 +18,8 @@ workdir = '$workdir'
 EOF
 
 # Run build with test data
-viral_usher build --config $config --docker_image angiehinrichs/viral_usher:development --no_genbank
+CONTAINER_IMAGE=${APPTAINER_CONTAINER:-angiehinrichs/viral_usher:development}
+viral_usher build --config $config --docker_image $CONTAINER_IMAGE --no_genbank
 
 # Check outputs exist
 cd $workdir
