@@ -5,7 +5,7 @@ description = "Easily configure and run a pipeline to build a tree of virus geno
 authors = [{ name = "Angie Hinrichs", email = "hinrichs@ucsc.edu" }]
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["requests", "biopython", "docker"]
+dependencies = ["requests", "biopython"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",

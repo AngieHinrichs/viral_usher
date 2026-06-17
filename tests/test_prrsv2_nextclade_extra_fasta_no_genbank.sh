@@ -19,8 +19,9 @@ time viral_usher init \
     -c $workdir/config.toml
 
 # Just one update --no_genbank run so only extra fasta seqs are added
+CONTAINER_IMAGE=${APPTAINER_CONTAINER:-angiehinrichs/viral_usher:development}
 time viral_usher build \
-    -d angiehinrichs/viral_usher:development \
+    -d $CONTAINER_IMAGE \
     -c $workdir/config.toml \
     -u \
     --no_genbank

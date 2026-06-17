@@ -14,6 +14,7 @@ on:
       - "tests/test_data/**"
       - "Dockerfile"
       - "pyproject.toml"
+      - ".github/workflows/integration-test.yml"
 
 jobs:
   test:
@@ -37,6 +38,7 @@ jobs:
         tags: angiehinrichs/viral_usher:development
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        outputs: type=oci,dest=/tmp/viral_usher_apptainer.tar
 
     - name: Set up Python
       uses: actions/setup-python@v6
@@ -48,8 +50,22 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e .
 
-    - name: Run test script
+    - name: Run test script with docker
       run: |
+        mkdir -p tests/test_data/output
+        bash tests/test_${{ matrix.test_name }}.sh tests/test_data/output
+        rm -rf tests/test_data/output
+
+    - name: Install Apptainer
+      uses: eWaterCycle/setup-apptainer@v2
+      with:
+        apptainer-version: 1.5.1
+
+    - name: Run test script with apptainer
+      env:
+        APPTAINER_CONTAINER: oci-archive:///tmp/viral_usher_apptainer.tar
+      run: |
+        apptainer --version
         mkdir -p tests/test_data/output
         bash tests/test_${{ matrix.test_name }}.sh tests/test_data/output
         rm -rf tests/test_data/output
